@@ -1,0 +1,174 @@
+name: bng-01
+prefix: ""
+
+mgmt:
+  network: bng-01
+  ipv4-subnet: 172.16.81.0/24
+
+topology:
+  kinds:
+    vr-sros:
+      image: vrnetlab/nokia_sros:24.7.R2 # internal image, external users should build/use their own image
+      license: ./license.txt # license file must be obtained from Nokia
+    linux:
+      image: ghcr.io/srl-labs/network-multitool
+      
+  nodes:
+    bng1:
+      kind: vr-sros
+      type: >-
+        cp: cpu=2 min_ram=4 chassis=sr-7 slot=A card=cpm5 ___
+        lc: cpu=2 min_ram=4 max_nics=6 chassis=sr-7 slot=1 card=iom4-e mda/1=me6-10gb-sfp+ mda/2=isa2-bb
+      mgmt-ipv4: 172.16.81.10
+      startup-config: ./configs/bng1/bng1.partial.cfg
+    pe1isp:
+       kind: vr-sros
+       type: sr-1
+       mgmt-ipv4: 172.16.81.11
+       startup-config: ./configs/pe1isp/pe1isp.partial.cfg
+    pe2agg:
+       kind: vr-sros
+       type: sr-1
+       mgmt-ipv4: 172.16.81.12
+       startup-config: ./configs/pe2agg/pe2agg.partial.cfg
+
+    ispserver:
+       kind: linux
+       mgmt-ipv4: 172.16.81.15
+       exec:
+        - apk add python3 iperf iptraf-ng
+        - ip address add 200.0.0.2/30 dev eth1
+        - ip -6 address add 2002::200.0.0.2/96 dev eth1
+        - ip route add 180.0.0.0/27 via 200.0.0.1
+        - ip -6 route add 2800:db8::/32 via 2002::c800:1
+        - iperf3 -s -p 5201 -D
+        - iperf3 -s -p 5202 -D
+        - iperf3 -s -p 5203 -D
+
+    radius:
+       kind: linux
+       mgmt-ipv4: 172.16.81.16
+       binds:
+        - configs/radius:/config
+       exec:
+        - apk add freeradius freeradius-utils
+        - ip addr add 192.168.7.2/30 dev eth1
+        - ip route add 10.100.0.0/24 via 192.168.7.1
+        - /bin/bash /config/config.sh
+        - /usr/sbin/radiusd
+
+
+    client1:
+       kind: linux
+       image: ghcr.io/hellt/network-multitool
+       mgmt-ipv4: 172.16.81.21
+       binds:
+        - configs/client1:/config
+       exec:
+        - apk add python3 iperf dhclient ppp-pppoe iptraf-ng
+        - ip link set dev eth1 address 02:42:ac:00:00:01
+        - /bin/bash /config/config.sh
+
+    client2:
+       kind: linux
+       image: ghcr.io/hellt/network-multitool
+       mgmt-ipv4: 172.16.81.22
+       binds:
+        - configs/client2:/config
+       exec:
+        - apk add python3 iperf dhclient ppp-pppoe iptraf-ng
+        - ip link set dev eth1 address 02:42:ac:00:00:02
+        - /bin/bash /config/config.sh
+
+    client3:
+       mgmt-ipv4: 172.16.81.23
+       kind: linux
+       image: ghcr.io/hellt/network-multitool
+       binds:
+        - configs/client3:/config
+       exec:
+        - apk add python3 iperf dhclient ppp-pppoe iptraf-ng
+        - ip link set dev eth1 address 02:42:ac:00:00:03
+        - /bin/bash /config/config.sh
+
+
+###################
+    gnmic:
+      kind: linux
+      mgmt-ipv4: 172.16.81.31
+      image: ghcr.io/openconfig/gnmic:0.39.1
+      binds:
+        - configs/gnmic/gnmic-config.yml:/gnmic-config.yml:ro
+      cmd: --config /gnmic-config.yml --log subscribe
+
+    prometheus:
+      kind: linux
+      mgmt-ipv4: 172.16.81.32
+      image: quay.io/prometheus/prometheus:v2.54.1
+      binds:
+        - configs/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      cmd: --config.file=/etc/prometheus/prometheus.yml
+      ports:
+        - 9090:9090
+
+    grafana:
+      kind: linux
+      mgmt-ipv4: 172.16.81.33
+      image: grafana/grafana:11.2.0
+      binds:
+        - configs/grafana/datasource.yml:/etc/grafana/provisioning/datasources/datasource.yaml:ro
+        - configs/grafana/dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yaml:ro
+        - configs/grafana/dashboards:/var/lib/grafana/dashboards
+      ports:
+        - 3000:3000
+      env:
+        #env vars to enable anonymous access
+        GF_ORG_ROLE: "Admin"
+        GF_ORG_NAME: "Main Org"
+        GF_AUTH_ANONYMOUS_ENABLED: "true"
+        GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+        GF_AUTH_ANONYMOUS: "true"
+        GF_AUTH_OAUTH_AUTO_LOGIN: "true"
+
+    ### LOGGING STACK ###
+    promtail:
+      kind: linux
+      mgmt-ipv4: 172.16.81.34
+      image: grafana/promtail:3.2.0
+      binds:
+        - configs/promtail:/etc/promtail
+      cmd: --config.file=/etc/promtail/promtail-config.yml
+      ports:
+        - 9080:9080
+        - 1514:1514
+
+    loki:
+      kind: linux
+      mgmt-ipv4: 172.16.81.35
+      image: grafana/loki:3.2.0
+      binds:
+        - configs/loki:/etc/loki
+      cmd: --config.file=/etc/loki/loki-config.yml
+      ports:
+        - 3100:3100
+
+    rsyslog:
+      kind: linux
+      mgmt-ipv4: 172.16.81.36
+      image: rsyslog/syslog_appliance_alpine:latest
+      binds:
+        - configs/rsyslog/rsyslog.conf:/etc/rsyslog.conf
+      ports:
+        - 514:514/udp
+
+
+  links:
+    - endpoints: ["pe1isp:eth1", "bng1:eth2"]
+    - endpoints: ["pe1isp:eth3", "ispserver:eth1"]
+
+    - endpoints: ["bng1:eth3", "pe2agg:eth1"]
+    - endpoints: ["bng1:eth4", "radius:eth1"]
+
+    - endpoints: ["pe2agg:eth3", "client1:eth1"]
+    - endpoints: ["pe2agg:eth4", "client2:eth1"]
+    - endpoints: ["pe2agg:eth5", "client3:eth1"]

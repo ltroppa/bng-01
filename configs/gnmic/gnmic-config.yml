@@ -1,0 +1,61 @@
+username: 'admin'
+password: 'admin'
+insecure: true
+
+targets:
+#  clab-ixre2lab11-ixr3:
+  bng1:
+    subscriptions:
+      - port_stats
+      - subs_stats
+      - cpu_stats
+      - nat_sessions
+#  172.20.20.3:
+#    subsriptions:
+#      - port_stats
+
+subscriptions:
+  port_stats:
+    paths:
+#      - "/state/port[port-id=1/1/c1/1]/statistics/in-octets"
+#      - "/state/port[port-id=1/1/c3/1]/statistics/in-octets"
+      - "/state/port[port-id=*]/statistics"
+    stream-mode: sample
+    sample-interval: 5s
+    encoding: proto
+  subs_stats:
+    paths:
+      #- "/state/subscriber-mgmt/statistics"
+      - "state/subscriber-mgmt/statistics/sessions[counter=subscribers-total]/current-value"
+      - "state/subscriber-mgmt/statistics/sessions[counter=ppp-sessions-local-pppoe]/current-value"
+      - "state/subscriber-mgmt/statistics/total-hosts[counter=ipv4]/current-value"
+      - "state/subscriber-mgmt/statistics/total-hosts[counter=ipv6]/current-value"
+    stream-mode: sample
+    sample-interval: 5s
+    encoding: proto
+  cpu_stats:
+    paths:
+      - "/state/system/cpu[sample-period=1]/summary/usage/cpu-usage"
+    stream-mode: sample
+    sample-interval: 5s
+    encoding: proto
+  nat_sessions:
+    paths:
+      - "/state/isa/nat-group[id=1]/member[id=1]/resources/ports/value"
+    stream-mode: sample
+    sample-interval: 5s
+    encoding: proto
+
+
+
+
+outputs:
+  prom:
+    type: prometheus
+    listen: :9273
+    path: /metrics
+    metric-prefix: gnmic
+    append-subscription-name: true
+    export-timestamps: true
+    debug: true
+
